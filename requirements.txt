@@ -3,5 +3,6 @@ transformers
 speechbrain
 black
 paho-mqtt
+python-multipart
 fastapi
 uvicorn
