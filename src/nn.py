@@ -1,6 +1,9 @@
+import warnings
+
 from speechbrain.inference.speaker import SpeakerRecognition
 from torch import nn
 
+warnings.filterwarnings("ignore")
 
 def cos_similarity(
     model: SpeakerRecognition,
@@ -19,8 +22,8 @@ def cos_similarity(
 
 
 MODEL_ID = "speechbrain/spkrec-ecapa-voxceleb"
-PATH_SPEAKER = ""
-PATH_COMPARE = ""
+PATH_SPEAKER = "./src/samples/spk1_snt1.wav"
+PATH_COMPARE = "./src/samples/spk2_snt1.wav"
 
 
 if __name__ == "__main__":
