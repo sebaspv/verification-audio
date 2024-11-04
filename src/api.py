@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore")
 
 MODEL_ID = "speechbrain/spkrec-ecapa-voxceleb"
 PATH_SPEAKER = "./src/samples/spk1_snt1.wav"
-PATH_COMPARE = "./recorded_audio.wav"
+PATH_COMPARE = "./muchomejor.wav"
 
 def cos_similarity(
     model: SpeakerRecognition,
@@ -43,11 +43,15 @@ app.add_middleware(
 
 @app.post("/api/upload_audio")
 async def upload_audio(request: Request):
-    sample_rate = int(request.headers.get("Sample-Rate", 4000))  # Default to 4000 Hz
+    sample_rate = int(request.headers.get("Sample-Rate", 32000))  # Default to 32000 Hz
     channels = int(request.headers.get("Channels", 1))  # Default to mono
-    bits_per_sample = int(request.headers.get("Bits-Per-Sample", 16))
+    bits_per_sample = int(request.headers.get("Bits-Per-Sample", 16)) 
 
     raw_audio_data = await request.body()
+
+    if bits_per_sample != 16:
+        return {"error": "Only 16-bit audio is supported."}
+
     wav_file_path = "recorded_audio.wav"
     with wave.open(wav_file_path, "wb") as wf:
         wf.setnchannels(channels)
@@ -56,15 +60,8 @@ async def upload_audio(request: Request):
         wf.writeframes(raw_audio_data)
 
     verification = SpeakerRecognition.from_hparams(source=MODEL_ID)
-    waveform_speaker = verification.load_audio(PATH_SPEAKER)
-    waveform_comparison = verification.load_audio(PATH_COMPARE)
-    batch_speaker = waveform_speaker.unsqueeze(0)
-    batch_comparison = waveform_comparison.unsqueeze(0)
-
-    score, decision = cos_similarity(verification, batch_speaker, batch_comparison)
-    score = score[0]
-    decision = decision[0]
-
+    score, decision = verification.verify_files(PATH_SPEAKER, PATH_COMPARE)
+    print(score)
     if decision == 1:
         return {"message": "authorized"}
     else:

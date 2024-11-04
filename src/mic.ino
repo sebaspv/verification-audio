@@ -1,118 +1,97 @@
+#include <driver/i2s.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <driver/i2s.h>
 
 const char* ssid = "lambda";
 const char* password = "MilanesA336";
-const char* serverURL = "http://973a-189-165-44-123.ngrok-free.app/api/upload_audio";
 
-// PDM configuration
-const int sampleRate = 16000;
-const float recordTime = 1;  // Record for 0.5 seconds at a time
-const int bufferSize = sampleRate * recordTime;  // Buffer size for 0.5 seconds of audio
-int16_t* audioData = NULL;
+const char* serverUrl = "http://0bcd-189-165-44-123.ngrok-free.app/api/upload_audio";
 
-#define PDM_CLK_PIN 18  // Connect to SCK
-#define PDM_DATA_PIN 21  // Connect to SD
+#define SAMPLE_RATE 4000  // Change to 4000 Hz
+#define SAMPLE_BUFFER_SIZE (SAMPLE_RATE)
+#define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_LEFT
+#define I2S_MIC_SERIAL_CLOCK GPIO_NUM_18
+#define I2S_MIC_LEFT_RIGHT_CLOCK GPIO_NUM_22
+#define I2S_MIC_SERIAL_DATA GPIO_NUM_21
+
+// I2S and buffer configuration
+i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+    .sample_rate = SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,  // Change to 16-bit recording
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+    .communication_format = I2S_COMM_FORMAT_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 4,
+    .dma_buf_len = 1024,
+    .use_apll = false,
+    .tx_desc_auto_clear = false,
+    .fixed_mclk = 0};
+
+i2s_pin_config_t i2s_mic_pins = {
+    .bck_io_num = I2S_MIC_SERIAL_CLOCK,
+    .ws_io_num = I2S_MIC_LEFT_RIGHT_CLOCK,
+    .data_out_num = I2S_PIN_NO_CHANGE,
+    .data_in_num = I2S_MIC_SERIAL_DATA};
+
+// Buffer for raw 16-bit audio samples
+int16_t raw_samples[SAMPLE_BUFFER_SIZE];
 
 void setup() {
-    Serial.begin(115200);
-    connectWiFi();
+  // Start serial communication
+  Serial.begin(115200);
 
-    // Configure I2S for PDM mode
-    i2s_config_t i2sConfig = {
-        .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM),
-        .sample_rate = sampleRate,
-        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,  // Mono input from PDM mic
-        .communication_format = I2S_COMM_FORMAT_I2S_MSB,
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 8,
-        .dma_buf_len = 512,
-        .use_apll = false
-    };
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
 
-    i2s_pin_config_t pinConfig = {
-        .bck_io_num = I2S_PIN_NO_CHANGE,  // Not used in PDM mode
-        .ws_io_num = I2S_PIN_NO_CHANGE,   // Not used in PDM mode
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num = PDM_DATA_PIN       // Data input pin
-    };
-
-    esp_err_t err = i2s_driver_install(I2S_NUM_0, &i2sConfig, 0, NULL);
-    if (err != ESP_OK) {
-        Serial.println("Failed to install I2S driver");
-    } else {
-        Serial.println("I2S driver installed successfully in PDM mode");
-        i2s_set_pin(I2S_NUM_0, &pinConfig);
-        i2s_set_clk(I2S_NUM_0, sampleRate, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
-    }
+  // Start the I2S interface
+  i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+  i2s_set_pin(I2S_NUM_0, &i2s_mic_pins);
 }
 
 void loop() {
-    Serial.println("Recording audio...");
-    recordAndSendAudio();
-    delay(30000);  // Wait 30 seconds before recording again
+  size_t bytes_read = 0;
+
+  // Read 16-bit audio from the I2S device
+  i2s_read(I2S_NUM_0, raw_samples, sizeof(int16_t) * SAMPLE_BUFFER_SIZE, &bytes_read, portMAX_DELAY);
+  int samples_read = bytes_read / sizeof(int16_t);
+
+  // Send the 16-bit audio data to the server
+  sendAudioToServer((uint8_t*)raw_samples, samples_read);
+  
+  delay(1000);  // Add delay for pacing
 }
 
-void connectWiFi() {
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("\nConnected to Wi-Fi");
-}
+void sendAudioToServer(uint8_t* audio_data, int samples_read) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(serverUrl);  // Specify the URL
 
-void recordAndSendAudio() {
-    // Allocate memory in DRAM for 0.5 seconds of audio data
-    audioData = (int16_t*)malloc(bufferSize * sizeof(int16_t));
-    if (audioData == NULL) {
-        Serial.println("Failed to allocate DRAM");
-        return;
-    }
+    // Set the headers
+    http.addHeader("Content-Type", "application/octet-stream");
+    http.addHeader("Sample-Rate", String(SAMPLE_RATE));
+    http.addHeader("Channels", "1");  // Mono
+    http.addHeader("Bits-Per-Sample", "16");  // Now sending 16-bit audio
 
-    // Record audio for 0.5 seconds
-    size_t bytesRead = 0;
-    int offset = 0;
-    while (offset < bufferSize) {
-        i2s_read(I2S_NUM_0, (char*)(audioData + offset), sizeof(int16_t) * (bufferSize - offset), &bytesRead, portMAX_DELAY);
-        offset += bytesRead / sizeof(int16_t);
-    }
+    // Send the POST request with the audio data
+    int httpResponseCode = http.POST(audio_data, samples_read * sizeof(int16_t));
 
-    // Send the recorded audio data
-    sendAudio();
-
-    // Free the memory after sending
-    free(audioData);
-}
-
-void sendAudio() {
-    if (WiFi.status() == WL_CONNECTED) {
-        HTTPClient http;
-
-        // Prepare the POST request
-        http.begin(serverURL);
-        http.addHeader("Content-Type", "application/octet-stream");
-        http.addHeader("Sample-Rate", String(sampleRate));  // Include sample rate
-        http.addHeader("Channels", "1");                     // Include number of channels (mono)
-        http.addHeader("Bits-Per-Sample", "16");             // Include bits per sample
-
-        // Send the raw audio data
-        int responseCode = http.POST((uint8_t*)audioData, bufferSize * sizeof(int16_t));
-
-        Serial.printf("Response code: %d\n", responseCode);
-
-        if (responseCode > 0) {
-            String response = http.getString();
-            Serial.println("Server response: " + response);
-        }
-        http.end();
+    // Check the response
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println(httpResponseCode);
+      Serial.println(response);
     } else {
-        Serial.println("Error: Not connected to WiFi");
+      Serial.printf("Error sending POST: %s\n", http.errorToString(httpResponseCode).c_str());
     }
+
+    http.end();  // Free resources
+  } else {
+    Serial.println("WiFi not connected");
+  }
 }
-
-
-
-
