@@ -43,18 +43,15 @@ app.add_middleware(
 
 @app.post("/api/upload_audio")
 async def upload_audio(request: Request):
-    sample_rate = int(request.headers.get("Sample-Rate", 16000))
-    channels = int(request.headers.get("Channels", 1))
+    sample_rate = int(request.headers.get("Sample-Rate", 4000))  # Default to 4000 Hz
+    channels = int(request.headers.get("Channels", 1))  # Default to mono
     bits_per_sample = int(request.headers.get("Bits-Per-Sample", 16))
 
-    # Read the raw audio data from the request body
     raw_audio_data = await request.body()
-
-    # Create a WAV file
     wav_file_path = "recorded_audio.wav"
     with wave.open(wav_file_path, "wb") as wf:
         wf.setnchannels(channels)
-        wf.setsampwidth(bits_per_sample // 8)  # Bits to bytes
+        wf.setsampwidth(bits_per_sample // 8)  # 16-bit is 2 bytes
         wf.setframerate(sample_rate)
         wf.writeframes(raw_audio_data)
 
