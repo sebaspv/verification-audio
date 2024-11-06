@@ -43,7 +43,7 @@ app.add_middleware(
 
 @app.post("/api/upload_audio")
 async def upload_audio(request: Request):
-    sample_rate = int(request.headers.get("Sample-Rate", 32000))  # Default to 32000 Hz
+    sample_rate = int(request.headers.get("Sample-Rate", 8000))  # Default to 32000 Hz
     channels = int(request.headers.get("Channels", 1))  # Default to mono
     bits_per_sample = int(request.headers.get("Bits-Per-Sample", 16)) 
 
