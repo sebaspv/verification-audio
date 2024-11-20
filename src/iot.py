@@ -1,6 +1,5 @@
 import wave
 import paho.mqtt.client as mqtt
-import io
 from speechbrain.inference.speaker import SpeakerRecognition
 from torch import nn
 import warnings
