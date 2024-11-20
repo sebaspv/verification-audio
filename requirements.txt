@@ -2,7 +2,7 @@ torch
 transformers
 speechbrain
 black
-paho-mqtt
+paho-mqtt<2.0.0
 python-multipart
 fastapi
 uvicorn

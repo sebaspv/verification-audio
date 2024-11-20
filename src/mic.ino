@@ -4,115 +4,90 @@
 
 const char* ssid = "lambda";
 const char* password = "MilanesA336";
-const char* serverURL = "http://973a-189-165-44-123.ngrok-free.app/api/upload_audio";
+const char* serverURL = "http://15f1-189-165-44-123.ngrok-free.app/api/upload_audio";
 
-// PDM configuration
-const int sampleRate = 16000;
-const float recordTime = 1;  // Record for 0.5 seconds at a time
-const int bufferSize = sampleRate * recordTime;  // Buffer size for 0.5 seconds of audio
-int16_t* audioData = NULL;
+#define I2S_NUM I2S_NUM_0 // Periférico I2S
+#define SAMPLE_RATE 32000 // Frecuencia de muestreo
+#define DURATION 1        // Duración en segundos
+#define BITS_PER_SAMPLE 16 // Bits por muestra
+#define ADC_INPUT_PIN GPIO4 // Entrada analógica (conectada al OUT del MAX9814)
+#define BUTTON_PIN 18      // Pin del botón
+#define LED_PIN 23 // Pin LED
+#define LED2_PIN 22 // Pin LED ROJO
 
-#define PDM_CLK_PIN 18  // Connect to SCK
-#define PDM_DATA_PIN 21  // Connect to SD
+#define BUFFER_SIZE (SAMPLE_RATE * DURATION * (BITS_PER_SAMPLE / 8)) // Tamaño del buffer
+
+uint8_t audioBuffer[BUFFER_SIZE]; // Buffer para almacenar datos de audio
 
 void setup() {
-    Serial.begin(115200);
-    connectWiFi();
+  Serial.begin(115200);
 
-    // Configure I2S for PDM mode
-    i2s_config_t i2sConfig = {
-        .mode = i2s_mode_t(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM),
-        .sample_rate = sampleRate,
-        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,  // Mono input from PDM mic
-        .communication_format = I2S_COMM_FORMAT_I2S_MSB,
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 8,
-        .dma_buf_len = 512,
-        .use_apll = false
-    };
+  // Configurar el botón como entrada
+  pinMode(BUTTON_PIN, INPUT_PULLUP); // Usa PULLUP para evitar problemas con señales flotantes
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(LED2_PIN, OUTPUT);
+  // Conectar a WiFi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConectado a WiFi");
 
-    i2s_pin_config_t pinConfig = {
-        .bck_io_num = I2S_PIN_NO_CHANGE,  // Not used in PDM mode
-        .ws_io_num = I2S_PIN_NO_CHANGE,   // Not used in PDM mode
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num = PDM_DATA_PIN       // Data input pin
-    };
+  // Configurar I2S para entrada desde ADC
+  i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN),
+    .sample_rate = 32000,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+    .communication_format = I2S_COMM_FORMAT_I2S_LSB,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 2,
+    .dma_buf_len = 1024,
+    .use_apll = false,
+    .tx_desc_auto_clear = false,
+    .fixed_mclk = 0};
 
-    esp_err_t err = i2s_driver_install(I2S_NUM_0, &i2sConfig, 0, NULL);
-    if (err != ESP_OK) {
-        Serial.println("Failed to install I2S driver");
-    } else {
-        Serial.println("I2S driver installed successfully in PDM mode");
-        i2s_set_pin(I2S_NUM_0, &pinConfig);
-        i2s_set_clk(I2S_NUM_0, sampleRate, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
-    }
+  // Inicializar I2S
+  i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL);
+  i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_7); // Asignar el canal ADC (GPIO34)
+  i2s_adc_enable(I2S_NUM); // Habilitar lectura del ADC
 }
 
 void loop() {
-    Serial.println("Recording audio...");
-    recordAndSendAudio();
-    delay(30000);  // Wait 30 seconds before recording again
-}
+  // Leer estado del botón
+  if (digitalRead(BUTTON_PIN) == LOW) { // El botón está presionado (LOW debido al PULLUP)
+    Serial.println("Botón presionado, grabando audio...");
 
-void connectWiFi() {
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("\nConnected to Wi-Fi");
-}
+    // Capturar audio durante 1 segundo
+    size_t bytesRead;
+    i2s_read(I2S_NUM, audioBuffer, BUFFER_SIZE, &bytesRead, portMAX_DELAY);
+    Serial.printf("Audio capturado: %d bytes\n", bytesRead);
 
-void recordAndSendAudio() {
-    // Allocate memory in DRAM for 0.5 seconds of audio data
-    audioData = (int16_t*)malloc(bufferSize * sizeof(int16_t));
-    if (audioData == NULL) {
-        Serial.println("Failed to allocate DRAM");
-        return;
-    }
-
-    // Record audio for 0.5 seconds
-    size_t bytesRead = 0;
-    int offset = 0;
-    while (offset < bufferSize) {
-        i2s_read(I2S_NUM_0, (char*)(audioData + offset), sizeof(int16_t) * (bufferSize - offset), &bytesRead, portMAX_DELAY);
-        offset += bytesRead / sizeof(int16_t);
-    }
-
-    // Send the recorded audio data
-    sendAudio();
-
-    // Free the memory after sending
-    free(audioData);
-}
-
-void sendAudio() {
+    // Enviar audio a la API
     if (WiFi.status() == WL_CONNECTED) {
-        HTTPClient http;
+      HTTPClient http;
+      http.begin(serverURL);
+      http.addHeader("Content-Type", "application/octet-stream");
+      http.addHeader("Sample-Rate", String(SAMPLE_RATE));
+      http.addHeader("Channels", "1");
+      http.addHeader("Bits-Per-Sample", String(BITS_PER_SAMPLE));
 
-        // Prepare the POST request
-        http.begin(serverURL);
-        http.addHeader("Content-Type", "application/octet-stream");
-        http.addHeader("Sample-Rate", String(sampleRate));  // Include sample rate
-        http.addHeader("Channels", "1");                     // Include number of channels (mono)
-        http.addHeader("Bits-Per-Sample", "16");             // Include bits per sample
-
-        // Send the raw audio data
-        int responseCode = http.POST((uint8_t*)audioData, bufferSize * sizeof(int16_t));
-
-        Serial.printf("Response code: %d\n", responseCode);
-
-        if (responseCode > 0) {
-            String response = http.getString();
-            Serial.println("Server response: " + response);
-        }
-        http.end();
-    } else {
-        Serial.println("Error: Not connected to WiFi");
+      int httpResponseCode = http.POST(audioBuffer, bytesRead);
+      Serial.printf("Codigo: %d\n", httpResponseCode);
+      if (httpResponseCode == 200) {
+        Serial.printf("Autorizado :)\n");
+        digitalWrite(LED_PIN, HIGH);
+      } else {
+        Serial.printf("No autorizado\n");
+        digitalWrite(LED2_PIN, HIGH);
+      }
+      http.end();
     }
+
+    delay(1000); // Esperar 1 segundo para evitar múltiples grabaciones al mantener el botón presionado
+  }
+  digitalWrite(LED_PIN, LOW);
+  digitalWrite(LED2_PIN, LOW);
+  delay(100); // Reducir el consumo de CPU en el bucle principal
 }
-
-
-
-

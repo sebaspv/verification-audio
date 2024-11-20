@@ -2,7 +2,7 @@ import wave
 from fastapi.middleware.cors import CORSMiddleware
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response, status
 import warnings
 
 from speechbrain.inference.speaker import SpeakerRecognition
@@ -11,7 +11,7 @@ from torch import nn
 warnings.filterwarnings("ignore")
 
 MODEL_ID = "speechbrain/spkrec-ecapa-voxceleb"
-PATH_SPEAKER = "./src/samples/spk1_snt1.wav"
+PATH_SPEAKER = "./src/samples/voz_sebastian.wav"
 PATH_COMPARE = "./recorded_audio.wav"
 
 def cos_similarity(
@@ -42,8 +42,8 @@ app.add_middleware(
 
 
 @app.post("/api/upload_audio")
-async def upload_audio(request: Request):
-    sample_rate = int(request.headers.get("Sample-Rate", 4000))  # Default to 4000 Hz
+async def upload_audio(request: Request, response: Response):
+    sample_rate = int(request.headers.get("Sample-Rate", 32000))  # Default to 4000 Hz
     channels = int(request.headers.get("Channels", 1))  # Default to mono
     bits_per_sample = int(request.headers.get("Bits-Per-Sample", 16))
 
@@ -64,10 +64,11 @@ async def upload_audio(request: Request):
     score, decision = cos_similarity(verification, batch_speaker, batch_comparison)
     score = score[0]
     decision = decision[0]
-
-    if decision == 1:
+    print(decision[0])
+    if decision[0]:
         return {"message": "authorized"}
     else:
+        response.status_code = 401
         return {"message": "not authorized"}
 
 
