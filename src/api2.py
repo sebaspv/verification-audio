@@ -17,7 +17,7 @@ from torch import nn
 warnings.filterwarnings("ignore")
 
 MODEL_ID = "speechbrain/spkrec-ecapa-voxceleb"
-PATH_SPEAKER = "./src/samples/audio_tono.wav"
+audios = ["./src/samples/audio_tono.wav", "./src/samples/recorded_audio.wav", "./src/samples/audio_albert.wav", "./src/samples/audio_luis.wav"]
 PATH_COMPARE = "./recorded_audio.wav"
 mqtt_broker = "127.0.0.1"
 mqtt_port = 8001
@@ -62,17 +62,21 @@ async def upload_audio(request: Request, response: Response):
         wf.setsampwidth(bits_per_sample // 8)  # 16-bit is 2 bytes
         wf.setframerate(sample_rate)
         wf.writeframes(raw_audio_data)
-
+    
+    flag = False
     verification = SpeakerRecognition.from_hparams(source=MODEL_ID)
-    waveform_speaker = verification.load_audio(PATH_SPEAKER)
-    waveform_comparison = verification.load_audio(PATH_COMPARE)
-    batch_speaker = waveform_speaker.unsqueeze(0)
-    batch_comparison = waveform_comparison.unsqueeze(0)
-
-    score, decision = cos_similarity(verification, batch_speaker, batch_comparison)
-    score = score[0]
-    decision = decision[0]
-    if decision[0]:
+    for PATH_SPEAKER in audios:
+        waveform_speaker = verification.load_audio(PATH_SPEAKER)
+        waveform_comparison = verification.load_audio(PATH_COMPARE)
+        batch_speaker = waveform_speaker.unsqueeze(0)
+        batch_comparison = waveform_comparison.unsqueeze(0)
+        score, decision = cos_similarity(verification, batch_speaker, batch_comparison)
+        score = score[0]
+        decision = decision[0]
+        if decision[0]:
+            flag = True
+    
+    if flag:
         publish.single(mqtt_topic_audio, "1", hostname=mqtt_broker, port=mqtt_port)
         return {"message": "authorized"}
     else:

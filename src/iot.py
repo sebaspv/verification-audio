@@ -1,8 +1,9 @@
+import warnings
 import wave
+
 import paho.mqtt.client as mqtt
 from speechbrain.inference.speaker import SpeakerRecognition
 from torch import nn
-import warnings
 
 warnings.filterwarnings("ignore")
 
